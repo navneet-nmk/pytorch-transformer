@@ -120,6 +120,37 @@ class Decoder(nn.Module):
         self.layers = clones(layer, n)
         self.norm = LayerNorm(layer.size)
 
+    def forward(self, x, memory, source_mask, target_mask):
+        for layer in self.layers:
+            x = layer(x, memory, source_mask, target_mask )
+        return self.norm(x)
+
+
+# Define a single decoder layer
+class DecoderLayer(nn.Module):
+
+    def __init__(self, size, dropout, self_attn, feed_forward, d_model, vocab):
+        super(DecoderLayer, self).__init__()
+        self.size = size
+        self.dropout = nn.Dropout(dropout)
+        self.attn = self_attn
+        self.sub_layers = clones(SubLayer(size, dropout), 3)
+        self.feed_forward  = feed_forward
+        self.generator = Generator(d_model=d_model, vocab=vocab)
+
+    def forward(self, x, memory, source_mask, target_mask):
+        x = self.attn(x, x, x, target_mask)
+        x = self.sub_layers[0](x)
+        x = self.attn(x, memory, memory, source_mask)
+        x = self.sub_layers[1](x)
+        x = self.feed_forward(x)
+        x = self.sub_layers[2](x)
+        return x
+
+
+
+
+
 
 
 
