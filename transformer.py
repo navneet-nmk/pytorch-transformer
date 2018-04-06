@@ -1,6 +1,8 @@
 import torch.nn as nn
 import torch.nn.functional as F
 import torch
+import numpy as np
+from utils import clones
 
 
 class EncoderDecoder(nn.Module):
@@ -40,11 +42,6 @@ class Generator(nn.Module):
 
     def forward(self, x):
         return F.log_softmax(self.proj(x), dim=-1)
-
-
-def clones(module, N):
-    "Produce N identical layers."
-    return nn.ModuleList([copy.deepcopy(module) for _ in range(N)])
 
 
 # Define the layer normalization layer
@@ -129,11 +126,13 @@ class Decoder(nn.Module):
 # Define a single decoder layer
 class DecoderLayer(nn.Module):
 
-    def __init__(self, size, dropout, self_attn, feed_forward, d_model, vocab):
+    def __init__(self, size, dropout, self_attn, src_attn,
+                 feed_forward, d_model, vocab):
         super(DecoderLayer, self).__init__()
         self.size = size
         self.dropout = nn.Dropout(dropout)
         self.attn = self_attn
+        self.src_attn = src_attn
         self.sub_layers = clones(SubLayer(size, dropout), 3)
         self.feed_forward  = feed_forward
         self.generator = Generator(d_model=d_model, vocab=vocab)
@@ -141,11 +140,53 @@ class DecoderLayer(nn.Module):
     def forward(self, x, memory, source_mask, target_mask):
         x = self.attn(x, x, x, target_mask)
         x = self.sub_layers[0](x)
-        x = self.attn(x, memory, memory, source_mask)
+        x = self.src_attn(x, memory, memory, source_mask)
         x = self.sub_layers[1](x)
         x = self.feed_forward(x)
         x = self.sub_layers[2](x)
         return x
+
+
+# Define the position wise feed forward neural network
+class PositionWiseFeedForwardNN(nn.Module):
+    def __init__(self, d_model, d_ff, dropout = 0.1):
+        super(PositionWiseFeedForwardNN, self).__init__()
+        self.d_model = d_model
+        self.d_ff = d_ff
+        self.dropout = nn.Dropout(dropout)
+        self.dense_1 = nn.Linear(self.d_model, self.d_ff)
+        self.dense_2 = nn.Linear(self.d_ff, self.d_model)
+
+    def forward(self, x):
+        x = self.dense_1(x)
+        x = F.relu(x)
+        x = self.dropout(x)
+        x = self.dense_2(x)
+        return x
+
+
+"""
+Modify the self attention sub layer in the decoder stack to prevent positions from attending to subsequent positions.
+This masking combined with the fact that the output is offset by a position of 1 ensures that the prediction for position 
+i can only depend on positions less than i.
+"""
+
+
+def subsequent_masking(size):
+    """
+    Mask out subsequent positions
+    :param size:
+    :return:
+    """
+
+    attn_shape = (1, size, size)
+    # np.triu returns the upper triangular matrix with values below the kth diagonal set to 0
+    subsequent_mask = np.triu(np.ones(attn_shape), k=1).astype('uint8')
+    return torch.from_numpy(subsequent_mask) == 0
+
+
+
+
 
 
 
